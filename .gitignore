@@ -1,0 +1,23 @@
+# build artifacts
+*.o
+*.d
+*.a
+
+# networking binaries
+networking/tempest/tempest
+networking/mastermind/mastermind
+
+# mastermind runtime output
+log.txt
+
+# editor / OS noise
+*~
+.DS_Store
+compile_commands.json
+.cache/
+
+# reference writeup, not part of the template
+02.md
+
+# course roster, never part of the template
+courseid_*_participants.csv
