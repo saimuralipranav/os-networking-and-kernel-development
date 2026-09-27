@@ -1,12 +1,32 @@
 #include "protocol.h"
 #include "logger.h"
 #include "discovery.h"
+#include "tcp_transport.h"
 #include "ui.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <poll.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+
+typedef enum {
+    STATE_LOBBY = 0,
+    STATE_CHALLENGE_PENDING_OUT,
+    STATE_CHALLENGE_PENDING_IN,
+    STATE_GAMEPLAY,
+    STATE_DISCONNECTED
+} AppState;
+
+static void set_nonblocking(int fd) {
+    int flags = fcntl(fd, F_GETFL, 0);
+    fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+}
 
 int main(int argc, char *argv[]) {
     int cost_cutting = 0;
@@ -35,16 +55,226 @@ int main(int argc, char *argv[]) {
         strcpy(local_name, "Player");
     }
 
+    /* Initialize TCP Listener */
+    TcpManager tcp;
+    if (tcp_init_listener(&tcp, 0) < 0) {
+        fprintf(stderr, "Failed to bind TCP listener\n");
+        return 1;
+    }
+
+    /* Initialize UDP Discovery */
     DiscoveryManager dm;
-    if (discovery_init(&dm, local_name, 0, cost_cutting) < 0) {
+    if (discovery_init(&dm, local_name, tcp.listen_port, cost_cutting) < 0) {
         fprintf(stderr, "Failed to initialize UDP discovery\n");
         return 1;
     }
 
-    /* Render lobby */
-    ui_render_lobby(dm.players, dm.player_count, local_name, 0, cost_cutting);
+    AppState state = STATE_LOBBY;
+    char peer_name[MM_MAX_NAME_LEN] = "Peer";
+    char peer_ip[64] = "";
+    uint16_t peer_port = 0;
+
+    char stdin_buf[256];
+    size_t stdin_len = 0;
+    int stdin_closed = 0;
+    set_nonblocking(STDIN_FILENO);
+
+    int lobby_needs_render = 1;
+
+    while (1) {
+        /* Run Discovery Ticks */
+        if (state == STATE_LOBBY) {
+            discovery_broadcast_tick(&dm);
+            if (discovery_recv_tick(&dm)) {
+                lobby_needs_render = 1;
+            }
+            if (discovery_prune_expired(&dm)) {
+                lobby_needs_render = 1;
+            }
+            if (lobby_needs_render) {
+                ui_render_lobby(dm.players, dm.player_count, local_name, tcp.listen_port, cost_cutting);
+                lobby_needs_render = 0;
+            }
+        }
+
+        /* Setup poll */
+        struct pollfd pfd[4];
+        int nfds = 0;
+
+        int stdin_pfd_idx = -1;
+        if (!stdin_closed) {
+            pfd[nfds].fd = STDIN_FILENO;
+            pfd[nfds].events = POLLIN;
+            pfd[nfds].revents = 0;
+            stdin_pfd_idx = nfds++;
+        }
+
+        pfd[nfds].fd = dm.udp_fd;
+        pfd[nfds].events = POLLIN;
+        pfd[nfds].revents = 0;
+        int disc_pfd_idx = nfds++;
+
+        int net_pfd_idx = -1;
+        int tcp_listen_idx = -1;
+
+        if (state == STATE_LOBBY) {
+            pfd[nfds].fd = tcp.listen_fd;
+            pfd[nfds].events = POLLIN;
+            pfd[nfds].revents = 0;
+            tcp_listen_idx = nfds++;
+        } else if (tcp.conn_fd >= 0) {
+            pfd[nfds].fd = tcp.conn_fd;
+            pfd[nfds].events = POLLIN;
+            pfd[nfds].revents = 0;
+            net_pfd_idx = nfds++;
+        }
+
+        int pr = poll(pfd, nfds, 200);
+        if (pr < 0) {
+            if (errno == EINTR) continue;
+            break;
+        }
+
+        /* Check Discovery socket */
+        if (disc_pfd_idx >= 0 && (pfd[disc_pfd_idx].revents & POLLIN)) {
+            if (discovery_recv_tick(&dm)) {
+                if (state == STATE_LOBBY) lobby_needs_render = 1;
+            }
+        }
+
+        /* Check TCP Listener */
+        if (tcp_listen_idx >= 0 && (pfd[tcp_listen_idx].revents & POLLIN)) {
+            struct sockaddr_in client_addr;
+            socklen_t client_len = sizeof(client_addr);
+            int new_sock = accept(tcp.listen_fd, (struct sockaddr *)&client_addr, &client_len);
+            if (new_sock >= 0) {
+                set_nonblocking(new_sock);
+                tcp.conn_fd = new_sock;
+                inet_ntop(AF_INET, &client_addr.sin_addr, peer_ip, sizeof(peer_ip));
+                peer_port = ntohs(client_addr.sin_port);
+                state = STATE_CHALLENGE_PENDING_IN;
+            }
+        }
+
+        /* Check Connected Socket */
+        GameMessage msg;
+        memset(&msg, 0, sizeof(msg));
+        int has_msg = 0;
+
+        if (net_pfd_idx >= 0 && (pfd[net_pfd_idx].revents & POLLIN)) {
+            int r = tcp_recv_msg(tcp.conn_fd, tcp.read_buf, &tcp.read_len, &msg);
+            if (r > 0) {
+                has_msg = 1;
+            } else if (r < 0) {
+                if (state != STATE_LOBBY) {
+                    state = STATE_DISCONNECTED;
+                    printf("\n%s disconnected. Press enter to go home.\n", peer_name);
+                    fflush(stdout);
+                }
+            }
+        }
+
+        /* Handle Messages */
+        if (has_msg) {
+            if (msg.type == MSG_CHALLENGE) {
+                strncpy(peer_name, msg.text, sizeof(peer_name) - 1);
+                state = STATE_CHALLENGE_PENDING_IN;
+                printf("\nChallenge from %s! Accept? (yes/no): ", peer_name);
+                fflush(stdout);
+            } else if (msg.type == MSG_ACCEPT) {
+                state = STATE_GAMEPLAY;
+                printf("\n%s accepted the challenge! You are the Mastermind (Feena).\n", peer_name);
+                fflush(stdout);
+            } else if (msg.type == MSG_REJECT) {
+                printf("\n%s rejected the challenge. Returning to lobby...\n", peer_name);
+                if (tcp.conn_fd >= 0) {
+                    close(tcp.conn_fd);
+                    tcp.conn_fd = -1;
+                }
+                state = STATE_LOBBY;
+                lobby_needs_render = 1;
+            }
+        }
+
+        /* Check Stdin */
+        if (stdin_pfd_idx >= 0 && (pfd[stdin_pfd_idx].revents & (POLLIN | POLLHUP | POLLERR))) {
+            char ch;
+            while (1) {
+                ssize_t n = read(STDIN_FILENO, &ch, 1);
+                if (n <= 0) {
+                    if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) {
+                        break;
+                    }
+                    stdin_closed = 1;
+                    break;
+                }
+                if (ch == '\r' || ch == '\n') {
+                    stdin_buf[stdin_len] = '\0';
+                    char input[256];
+                    strncpy(input, stdin_buf, sizeof(input) - 1);
+                    input[sizeof(input) - 1] = '\0';
+                    stdin_len = 0;
+
+                    if (state == STATE_LOBBY) {
+                        if (strncmp(input, "challenge ", 10) == 0) {
+                            int target_id = atoi(input + 10);
+                            const DiscoveredPlayer *target = discovery_find_by_id(&dm, target_id);
+                            if (!target) {
+                                printf("Invalid player ID %d. > ", target_id);
+                                fflush(stdout);
+                            } else {
+                                strncpy(peer_name, target->name, sizeof(peer_name) - 1);
+                                strncpy(peer_ip, target->ip, sizeof(peer_ip) - 1);
+                                peer_port = target->port;
+
+                                printf("Sending challenge to %s (%s:%u)...\n", peer_name, peer_ip, peer_port);
+                                fflush(stdout);
+
+                                int fd = tcp_connect_peer(peer_ip, peer_port);
+                                if (fd < 0) {
+                                    printf("Failed to connect to %s. Returning to lobby.\n> ", peer_name);
+                                    fflush(stdout);
+                                } else {
+                                    tcp.conn_fd = fd;
+                                    tcp_send_msg(tcp.conn_fd, MSG_CHALLENGE, local_name);
+                                    state = STATE_CHALLENGE_PENDING_OUT;
+                                }
+                            }
+                        }
+                    } else if (state == STATE_CHALLENGE_PENDING_IN) {
+                        if (strcmp(input, "yes") == 0) {
+                            tcp_send_msg(tcp.conn_fd, MSG_ACCEPT, local_name);
+                            state = STATE_GAMEPLAY;
+                            printf("\nYou accepted the challenge! You are the Codebreaker (Tatva).\n");
+                            fflush(stdout);
+                        } else if (strcmp(input, "no") == 0) {
+                            tcp_send_msg(tcp.conn_fd, MSG_REJECT, local_name);
+                            close(tcp.conn_fd);
+                            tcp.conn_fd = -1;
+                            state = STATE_LOBBY;
+                            lobby_needs_render = 1;
+                        } else {
+                            printf("Please answer 'yes' or 'no': ");
+                            fflush(stdout);
+                        }
+                    } else if (state == STATE_DISCONNECTED) {
+                        if (tcp.conn_fd >= 0) {
+                            close(tcp.conn_fd);
+                            tcp.conn_fd = -1;
+                        }
+                        state = STATE_LOBBY;
+                        lobby_needs_render = 1;
+                    }
+                    break;
+                } else if (stdin_len < sizeof(stdin_buf) - 1) {
+                    stdin_buf[stdin_len++] = ch;
+                }
+            }
+        }
+    }
 
     discovery_close(&dm);
+    tcp_close(&tcp);
     logger_close();
     return 0;
 }
