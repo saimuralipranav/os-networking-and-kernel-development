@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "url.h"
+#include "http.h"
 
 int main(int argc, char *argv[]) {
     if (argc < 2) {
@@ -26,6 +27,21 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
+    HttpResponse resp;
+    int rc = http_get_weather(encoded_city, &resp);
     free(encoded_city);
+
+    if (rc != 0 || !resp.is_valid_location) {
+        http_response_free(&resp);
+        fprintf(stderr, "tempest: invalid location\n");
+        return 1;
+    }
+
+    /* Normal mode: print only the weather body without headers */
+    if (resp.body) {
+        fputs(resp.body, stdout);
+    }
+
+    http_response_free(&resp);
     return 0;
 }

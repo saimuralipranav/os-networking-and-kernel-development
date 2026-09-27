@@ -13,7 +13,7 @@ typedef struct {
     int is_valid_location;   /* 1 if location found and report valid, 0 otherwise */
 } HttpResponse;
 
-int http_connect(const char *host, const char *port);
+int http_get_weather(const char *encoded_city, HttpResponse *resp);
 void http_response_free(HttpResponse *resp);
 
 #endif /* TEMPEST_HTTP_H */
