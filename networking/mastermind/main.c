@@ -167,6 +167,13 @@ int main(int argc, char *argv[]) {
             int r = tcp_recv_msg(tcp.conn_fd, tcp.read_buf, &tcp.read_len, &msg);
             if (r > 0) {
                 has_msg = 1;
+            } else if (r < 0) {
+                /* Detect TCP Disconnection */
+                if (state == STATE_GAMEPLAY || state == STATE_CHALLENGE_PENDING_OUT || state == STATE_CHALLENGE_PENDING_IN) {
+                    state = STATE_DISCONNECTED;
+                    printf("\n%s disconnected. Press enter to go home.\n", peer_name);
+                    fflush(stdout);
+                }
             }
         }
 
@@ -222,13 +229,16 @@ int main(int argc, char *argv[]) {
                     }
                 }
             } else if (msg.type == MSG_END) {
-                /* Master sequence revealed to Codebreaker upon game end */
                 strncpy(game.master_seq, msg.text, MM_SEQ_LEN);
                 game.master_seq[MM_SEQ_LEN] = '\0';
                 game.game_over = 1;
                 ui_render_board(&game);
                 state = STATE_GAME_OVER;
                 printf("\nMaster sequence was: %s\nPress enter to go home.\n", game.master_seq);
+                fflush(stdout);
+            } else if (msg.type == MSG_DISCONNECT) {
+                state = STATE_DISCONNECTED;
+                printf("\n%s disconnected. Press enter to go home.\n", peer_name);
                 fflush(stdout);
             }
         }
@@ -318,7 +328,6 @@ int main(int argc, char *argv[]) {
 
                                 if (finished) {
                                     state = STATE_GAME_OVER;
-                                    /* Reveal master sequence to Codebreaker upon completion */
                                     tcp_send_msg(tcp.conn_fd, MSG_END, game.master_seq);
 
                                     if (game.codebreaker_won) {
