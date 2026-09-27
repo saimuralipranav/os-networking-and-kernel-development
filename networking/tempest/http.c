@@ -3,12 +3,31 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <errno.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netdb.h>
 #include <sys/time.h>
 
 #define REQUEST_TIMEOUT_SEC 10
+
+static ssize_t send_all(int fd, const char *buf, size_t len) {
+    size_t total = 0;
+    while (total < len) {
+        ssize_t n = send(fd, buf + total, len - total, 0);
+        if (n < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return -1;
+        }
+        if (n == 0) {
+            break;
+        }
+        total += (size_t)n;
+    }
+    return (ssize_t)total;
+}
 
 int http_connect(const char *host, const char *port) {
     struct addrinfo hints;
@@ -45,6 +64,27 @@ int http_connect(const char *host, const char *port) {
     }
     freeaddrinfo(res);
     return sockfd;
+}
+
+int http_send_request(int sockfd, const char *host, const char *encoded_city) {
+    char req_buf[2048];
+    int req_len = snprintf(req_buf, sizeof(req_buf),
+        "GET /%s?0T HTTP/1.1\r\n"
+        "Host: %s\r\n"
+        "User-Agent: curl/8.5.0\r\n"
+        "Accept: */*\r\n"
+        "Connection: close\r\n"
+        "\r\n",
+        encoded_city, host);
+
+    if (req_len < 0 || (size_t)req_len >= sizeof(req_buf)) {
+        return -1;
+    }
+
+    if (send_all(sockfd, req_buf, (size_t)req_len) < 0) {
+        return -1;
+    }
+    return 0;
 }
 
 void http_response_free(HttpResponse *resp) {
