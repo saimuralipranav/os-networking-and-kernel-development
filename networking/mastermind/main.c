@@ -40,7 +40,7 @@ int main(int argc, char *argv[]) {
     }
 
     logger_init(logging);
-    logger_log("Mastermind launched (TCP persistent gameplay). logging=%d", logging);
+    logger_log("Mastermind launched. logging=%d", logging);
 
     /* Prompt for player name */
     char local_name[MM_MAX_NAME_LEN];
@@ -167,12 +167,6 @@ int main(int argc, char *argv[]) {
             int r = tcp_recv_msg(tcp.conn_fd, tcp.read_buf, &tcp.read_len, &msg);
             if (r > 0) {
                 has_msg = 1;
-            } else if (r < 0) {
-                if (state != STATE_LOBBY) {
-                    state = STATE_DISCONNECTED;
-                    printf("\n%s disconnected. Press enter to go home.\n", peer_name);
-                    fflush(stdout);
-                }
             }
         }
 
@@ -211,9 +205,9 @@ int main(int argc, char *argv[]) {
                 }
             } else if (msg.type == MSG_FEEDBACK) {
                 if (!game.is_mastermind) {
-                    game_record_turn(&game, game.attempts[game.current_round], msg.text);
+                    int finished = game_record_turn(&game, game.attempts[game.current_round], msg.text);
                     ui_render_board(&game);
-                    if (game.game_over) {
+                    if (finished) {
                         state = STATE_GAME_OVER;
                         if (game.codebreaker_won) {
                             printf("\nYou cracked the sequence in %d attempts! WINNER!\n", game.current_round);
@@ -227,6 +221,15 @@ int main(int argc, char *argv[]) {
                         fflush(stdout);
                     }
                 }
+            } else if (msg.type == MSG_END) {
+                /* Master sequence revealed to Codebreaker upon game end */
+                strncpy(game.master_seq, msg.text, MM_SEQ_LEN);
+                game.master_seq[MM_SEQ_LEN] = '\0';
+                game.game_over = 1;
+                ui_render_board(&game);
+                state = STATE_GAME_OVER;
+                printf("\nMaster sequence was: %s\nPress enter to go home.\n", game.master_seq);
+                fflush(stdout);
             }
         }
 
@@ -308,13 +311,16 @@ int main(int argc, char *argv[]) {
                             } else if (awaiting_feena_feedback_approval) {
                                 char feedback[MM_SEQ_LEN + 1];
                                 game_compute_feedback(game.master_seq, pending_mastermind_guess, feedback);
-                                game_record_turn(&game, pending_mastermind_guess, feedback);
+                                int finished = game_record_turn(&game, pending_mastermind_guess, feedback);
                                 ui_render_board(&game);
                                 tcp_send_msg(tcp.conn_fd, MSG_FEEDBACK, feedback);
                                 awaiting_feena_feedback_approval = 0;
 
-                                if (game.game_over) {
+                                if (finished) {
                                     state = STATE_GAME_OVER;
+                                    /* Reveal master sequence to Codebreaker upon completion */
+                                    tcp_send_msg(tcp.conn_fd, MSG_END, game.master_seq);
+
                                     if (game.codebreaker_won) {
                                         printf("\n%s cracked your code in %d attempts!\n", peer_name, game.current_round);
                                     } else {
