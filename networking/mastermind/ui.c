@@ -39,3 +39,34 @@ void ui_render_lobby(const DiscoveredPlayer *players, int count, const char *loc
     printf("> ");
     fflush(stdout);
 }
+
+void ui_render_board(const GameState *game) {
+    if (!game) return;
+
+    printf("\033[2J\033[H"); /* Clear screen */
+    printf("--- MASTERMIND GAME BOARD [%s] ---\n",
+           game->is_mastermind ? "Feena (Mastermind)" : "Tatva (Codebreaker)");
+
+    for (int i = 0; i < MM_MAX_ATTEMPTS; i++) {
+        if (i < game->current_round) {
+            printf("%s ", game->attempts[i]);
+            if (!game->is_mastermind) {
+                ui_print_colored_feedback(game->feedbacks[i]);
+            } else {
+                printf("%s", game->feedbacks[i]);
+            }
+            putchar('\n');
+        } else {
+            /* Placeholder for future attempts */
+            printf("***** *****\n");
+        }
+    }
+
+    printf("-----\n");
+    if (game->is_mastermind || game->game_over) {
+        printf("%s\n", game->master_seq);
+    } else {
+        printf("*****\n");
+    }
+    fflush(stdout);
+}

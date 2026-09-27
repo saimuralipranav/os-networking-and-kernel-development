@@ -2,6 +2,7 @@
 #include "logger.h"
 #include "discovery.h"
 #include "tcp_transport.h"
+#include "game.h"
 #include "ui.h"
 
 #include <stdio.h>
@@ -20,6 +21,7 @@ typedef enum {
     STATE_CHALLENGE_PENDING_OUT,
     STATE_CHALLENGE_PENDING_IN,
     STATE_GAMEPLAY,
+    STATE_GAME_OVER,
     STATE_DISCONNECTED
 } AppState;
 
@@ -29,19 +31,16 @@ static void set_nonblocking(int fd) {
 }
 
 int main(int argc, char *argv[]) {
-    int cost_cutting = 0;
     int logging = 0;
 
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--cost-cutting") == 0) {
-            cost_cutting = 1;
-        } else if (strcmp(argv[i], "--log") == 0) {
+        if (strcmp(argv[i], "--log") == 0) {
             logging = 1;
         }
     }
 
     logger_init(logging);
-    logger_log("Mastermind launched. cost_cutting=%d, logging=%d", cost_cutting, logging);
+    logger_log("Mastermind launched (TCP persistent gameplay). logging=%d", logging);
 
     /* Prompt for player name */
     char local_name[MM_MAX_NAME_LEN];
@@ -64,12 +63,13 @@ int main(int argc, char *argv[]) {
 
     /* Initialize UDP Discovery */
     DiscoveryManager dm;
-    if (discovery_init(&dm, local_name, tcp.listen_port, cost_cutting) < 0) {
+    if (discovery_init(&dm, local_name, tcp.listen_port, 0) < 0) {
         fprintf(stderr, "Failed to initialize UDP discovery\n");
         return 1;
     }
 
     AppState state = STATE_LOBBY;
+    GameState game;
     char peer_name[MM_MAX_NAME_LEN] = "Peer";
     char peer_ip[64] = "";
     uint16_t peer_port = 0;
@@ -80,6 +80,8 @@ int main(int argc, char *argv[]) {
     set_nonblocking(STDIN_FILENO);
 
     int lobby_needs_render = 1;
+    char pending_mastermind_guess[MM_SEQ_LEN + 1] = "";
+    int awaiting_feena_feedback_approval = 0;
 
     while (1) {
         /* Run Discovery Ticks */
@@ -92,7 +94,7 @@ int main(int argc, char *argv[]) {
                 lobby_needs_render = 1;
             }
             if (lobby_needs_render) {
-                ui_render_lobby(dm.players, dm.player_count, local_name, tcp.listen_port, cost_cutting);
+                ui_render_lobby(dm.players, dm.player_count, local_name, tcp.listen_port, 0);
                 lobby_needs_render = 0;
             }
         }
@@ -182,8 +184,10 @@ int main(int argc, char *argv[]) {
                 printf("\nChallenge from %s! Accept? (yes/no): ", peer_name);
                 fflush(stdout);
             } else if (msg.type == MSG_ACCEPT) {
+                game_init(&game, 1);
                 state = STATE_GAMEPLAY;
                 printf("\n%s accepted the challenge! You are the Mastermind (Feena).\n", peer_name);
+                printf("Enter 5-digit master sequence: ");
                 fflush(stdout);
             } else if (msg.type == MSG_REJECT) {
                 printf("\n%s rejected the challenge. Returning to lobby...\n", peer_name);
@@ -193,6 +197,36 @@ int main(int argc, char *argv[]) {
                 }
                 state = STATE_LOBBY;
                 lobby_needs_render = 1;
+            } else if (msg.type == MSG_ATTEMPT) {
+                if (game.is_mastermind) {
+                    strncpy(pending_mastermind_guess, msg.text, MM_SEQ_LEN);
+                    pending_mastermind_guess[MM_SEQ_LEN] = '\0';
+                    char computed_fb[MM_SEQ_LEN + 1];
+                    game_compute_feedback(game.master_seq, pending_mastermind_guess, computed_fb);
+
+                    printf("\nReceived attempt: %s | Feedback calculated: %s\nPress Enter to send feedback to %s: ",
+                           pending_mastermind_guess, computed_fb, peer_name);
+                    fflush(stdout);
+                    awaiting_feena_feedback_approval = 1;
+                }
+            } else if (msg.type == MSG_FEEDBACK) {
+                if (!game.is_mastermind) {
+                    game_record_turn(&game, game.attempts[game.current_round], msg.text);
+                    ui_render_board(&game);
+                    if (game.game_over) {
+                        state = STATE_GAME_OVER;
+                        if (game.codebreaker_won) {
+                            printf("\nYou cracked the sequence in %d attempts! WINNER!\n", game.current_round);
+                        } else {
+                            printf("\n12 attempts exhausted! Game over.\n");
+                        }
+                        printf("Press enter to go home.\n");
+                        fflush(stdout);
+                    } else {
+                        printf("Attempt %d/12: ", game.current_round + 1);
+                        fflush(stdout);
+                    }
+                }
             }
         }
 
@@ -243,9 +277,10 @@ int main(int argc, char *argv[]) {
                         }
                     } else if (state == STATE_CHALLENGE_PENDING_IN) {
                         if (strcmp(input, "yes") == 0) {
-                            tcp_send_msg(tcp.conn_fd, MSG_ACCEPT, local_name);
+                            game_init(&game, 0);
                             state = STATE_GAMEPLAY;
-                            printf("\nYou accepted the challenge! You are the Codebreaker (Tatva).\n");
+                            tcp_send_msg(tcp.conn_fd, MSG_ACCEPT, local_name);
+                            printf("\nYou accepted! Waiting for %s to set the master sequence...\n", peer_name);
                             fflush(stdout);
                         } else if (strcmp(input, "no") == 0) {
                             tcp_send_msg(tcp.conn_fd, MSG_REJECT, local_name);
@@ -257,7 +292,55 @@ int main(int argc, char *argv[]) {
                             printf("Please answer 'yes' or 'no': ");
                             fflush(stdout);
                         }
-                    } else if (state == STATE_DISCONNECTED) {
+                    } else if (state == STATE_GAMEPLAY) {
+                        if (game.is_mastermind) {
+                            if (strcmp(game.master_seq, "*****") == 0) {
+                                if (!game_validate_sequence(input)) {
+                                    printf("Invalid sequence! Must be exactly 5 digits (0-9).\nEnter 5-digit master sequence: ");
+                                    fflush(stdout);
+                                } else {
+                                    strncpy(game.master_seq, input, MM_SEQ_LEN);
+                                    game.master_seq[MM_SEQ_LEN] = '\0';
+                                    ui_render_board(&game);
+                                    printf("\nMaster sequence set! Waiting for %s to make attempt 1/12...\n", peer_name);
+                                    fflush(stdout);
+                                }
+                            } else if (awaiting_feena_feedback_approval) {
+                                char feedback[MM_SEQ_LEN + 1];
+                                game_compute_feedback(game.master_seq, pending_mastermind_guess, feedback);
+                                game_record_turn(&game, pending_mastermind_guess, feedback);
+                                ui_render_board(&game);
+                                tcp_send_msg(tcp.conn_fd, MSG_FEEDBACK, feedback);
+                                awaiting_feena_feedback_approval = 0;
+
+                                if (game.game_over) {
+                                    state = STATE_GAME_OVER;
+                                    if (game.codebreaker_won) {
+                                        printf("\n%s cracked your code in %d attempts!\n", peer_name, game.current_round);
+                                    } else {
+                                        printf("\nAttempts exhausted! %s failed to crack the code.\n", peer_name);
+                                    }
+                                    printf("Press enter to go home.\n");
+                                    fflush(stdout);
+                                } else {
+                                    printf("\nWaiting for %s's next attempt...\n", peer_name);
+                                    fflush(stdout);
+                                }
+                            }
+                        } else {
+                            if (!game_validate_sequence(input)) {
+                                printf("Invalid guess! Must be exactly 5 digits (0-9).\nAttempt %d/12: ",
+                                       game.current_round + 1);
+                                fflush(stdout);
+                            } else {
+                                strncpy(game.attempts[game.current_round], input, MM_SEQ_LEN);
+                                game.attempts[game.current_round][MM_SEQ_LEN] = '\0';
+                                tcp_send_msg(tcp.conn_fd, MSG_ATTEMPT, input);
+                                printf("Sent attempt %s. Waiting for %s's feedback...\n", input, peer_name);
+                                fflush(stdout);
+                            }
+                        }
+                    } else if (state == STATE_GAME_OVER || state == STATE_DISCONNECTED) {
                         if (tcp.conn_fd >= 0) {
                             close(tcp.conn_fd);
                             tcp.conn_fd = -1;
