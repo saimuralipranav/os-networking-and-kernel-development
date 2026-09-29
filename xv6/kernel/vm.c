@@ -331,6 +331,50 @@ err:
   return -1;
 }
 
+// Handles a write fault on a Copy-on-Write page.
+// Allocates a fresh physical page if shared, copies content,
+// updates the PTE with PTE_W and clears PTE_COW.
+// Returns 0 on success, -1 on failure.
+int
+cowfault(pagetable_t pagetable, uint64 va)
+{
+  if (va >= MAXVA)
+    return -1;
+
+  va = PGROUNDDOWN(va);
+  pte_t *pte = walk(pagetable, va, 0);
+  if (pte == 0)
+    return -1;
+  if ((*pte & PTE_V) == 0 || (*pte & PTE_U) == 0)
+    return -1;
+  if ((*pte & PTE_COW) == 0)
+    return -1; // Not a CoW page
+
+  uint64 pa = PTE2PA(*pte);
+  int ref = kref_get((void *)pa);
+
+  if (ref > 1) {
+    // Shared page: allocate new physical page and copy
+    char *mem = kalloc();
+    if (mem == 0)
+      return -1; // Out of memory
+
+    memmove(mem, (char *)pa, PGSIZE);
+    kref_dec((void *)pa);
+
+    uint flags = (PTE_FLAGS(*pte) & ~PTE_COW) | PTE_W;
+    *pte = PA2PTE(mem) | flags;
+  } else if (ref == 1) {
+    // Single reference: re-enable write in place
+    *pte = (*pte & ~PTE_COW) | PTE_W;
+  } else {
+    panic("cowfault: ref < 1");
+  }
+
+  sfence_vma();
+  return 0;
+}
+
 // mark a PTE invalid for user access.
 // used by exec for the user stack guard page.
 void
