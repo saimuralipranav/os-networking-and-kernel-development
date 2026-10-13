@@ -71,12 +71,6 @@ int main(int argc, char *argv[]) {
     int rc = http_get_weather(encoded_city, &resp);
     free(encoded_city);
 
-    if (rc != 0 || !resp.is_valid_location) {
-        http_response_free(&resp);
-        fprintf(stderr, "tempest: invalid location\n");
-        return 1;
-    }
-
     if (raw_mode) {
         /* Print request with '> ' prefix */
         if (resp.request_str) {
@@ -94,11 +88,21 @@ int main(int argc, char *argv[]) {
         if (resp.body) {
             fputs(resp.body, stdout);
         }
-    } else {
-        /* Normal mode: print only the weather body without headers */
-        if (resp.body) {
-            fputs(resp.body, stdout);
-        }
+
+        int exit_code = (rc != 0 || !resp.is_valid_location) ? 1 : 0;
+        http_response_free(&resp);
+        return exit_code;
+    }
+
+    if (rc != 0 || !resp.is_valid_location) {
+        http_response_free(&resp);
+        fprintf(stderr, "tempest: invalid location\n");
+        return 1;
+    }
+
+    /* Normal mode: print only the weather body without headers */
+    if (resp.body) {
+        fputs(resp.body, stdout);
     }
 
     http_response_free(&resp);
