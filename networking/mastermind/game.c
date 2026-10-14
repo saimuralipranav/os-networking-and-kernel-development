@@ -85,11 +85,15 @@ int game_record_turn(GameState *game, const char *attempt, const char *feedback)
     if (!game || game->current_round >= MM_MAX_ATTEMPTS) return 1;
 
     int r = game->current_round;
-    strncpy(game->attempts[r], attempt, MM_SEQ_LEN);
-    game->attempts[r][MM_SEQ_LEN] = '\0';
+    if (attempt && attempt != game->attempts[r]) {
+        strncpy(game->attempts[r], attempt, MM_SEQ_LEN);
+        game->attempts[r][MM_SEQ_LEN] = '\0';
+    }
 
-    strncpy(game->feedbacks[r], feedback, MM_SEQ_LEN);
-    game->feedbacks[r][MM_SEQ_LEN] = '\0';
+    if (feedback && feedback != game->feedbacks[r]) {
+        strncpy(game->feedbacks[r], feedback, MM_SEQ_LEN);
+        game->feedbacks[r][MM_SEQ_LEN] = '\0';
+    }
 
     game->current_round++;
 

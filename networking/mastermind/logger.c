@@ -36,7 +36,7 @@ void logger_log(const char *fmt, ...) {
     va_end(args);
 
     /* Print to log file and flush */
-    fprintf(log_file, "[%s.%06ld] [LOG] %s\n", time_buffer, tv.tv_usec, msg_buf);
+    fprintf(log_file, "[%s.%06ld] [LOG] %s\n", time_buffer, (long)tv.tv_usec, msg_buf);
     fflush(log_file);
 }
 

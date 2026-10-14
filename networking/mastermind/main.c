@@ -101,6 +101,7 @@ int main(int argc, char *argv[]) {
 
     int lobby_needs_render = 1;
     char pending_mastermind_guess[MM_SEQ_LEN + 1] = "";
+    char tatva_last_attempt[MM_SEQ_LEN + 1] = "";
     int awaiting_feena_feedback_approval = 0;
 
     while (1) {
@@ -271,7 +272,7 @@ int main(int argc, char *argv[]) {
             } else if (msg.type == MSG_FEEDBACK) {
                 /* Tatva receives feedback from Feena */
                 if (!game.is_mastermind) {
-                    int finished = game_record_turn(&game, game.attempts[game.current_round], msg.text);
+                    int finished = game_record_turn(&game, tatva_last_attempt, msg.text);
                     ui_render_board(&game);
                     if (finished) {
                         state = STATE_GAME_OVER;
@@ -446,8 +447,8 @@ int main(int argc, char *argv[]) {
                                        game.current_round + 1);
                                 fflush(stdout);
                             } else {
-                                strncpy(game.attempts[game.current_round], input, MM_SEQ_LEN);
-                                game.attempts[game.current_round][MM_SEQ_LEN] = '\0';
+                                strncpy(tatva_last_attempt, input, MM_SEQ_LEN);
+                                tatva_last_attempt[MM_SEQ_LEN] = '\0';
 
                                 if (cost_cutting) {
                                     udp_transport_send_msg(&ut, MSG_ATTEMPT, input);
