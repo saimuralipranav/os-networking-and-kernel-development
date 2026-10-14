@@ -101,8 +101,8 @@ int main(int argc, char *argv[]) {
 
     int lobby_needs_render = 1;
     char pending_mastermind_guess[MM_SEQ_LEN + 1] = "";
-    char tatva_last_attempt[MM_SEQ_LEN + 1] = "";
-    int awaiting_feena_feedback_approval = 0;
+    char codebreaker_last_attempt[MM_SEQ_LEN + 1] = "";
+    int awaiting_feedback_approval = 0;
 
     while (1) {
         /* Run Discovery and Keepalive Ticks */
@@ -242,10 +242,10 @@ int main(int argc, char *argv[]) {
                 printf("\nChallenge from %s! Accept? (yes/no): ", peer_name);
                 fflush(stdout);
             } else if (msg.type == MSG_ACCEPT) {
-                /* Opponent accepted our challenge -> We are Mastermind (Feena)! */
+                /* Opponent accepted our challenge -> We are Mastermind (Codemaker)! */
                 game_init(&game, 1);
                 state = STATE_GAMEPLAY;
-                printf("\n%s accepted the challenge! You are the Mastermind (Feena).\n", peer_name);
+                printf("\n%s accepted the challenge! You are the Mastermind (Codemaker).\n", peer_name);
                 printf("Enter 5-digit master sequence: ");
                 fflush(stdout);
             } else if (msg.type == MSG_REJECT) {
@@ -257,7 +257,7 @@ int main(int argc, char *argv[]) {
                 state = STATE_LOBBY;
                 lobby_needs_render = 1;
             } else if (msg.type == MSG_ATTEMPT) {
-                /* Feena receives guess from Tatva */
+                /* Codemaker receives guess from Codebreaker */
                 if (game.is_mastermind) {
                     strncpy(pending_mastermind_guess, msg.text, MM_SEQ_LEN);
                     pending_mastermind_guess[MM_SEQ_LEN] = '\0';
@@ -267,12 +267,12 @@ int main(int argc, char *argv[]) {
                     printf("\nReceived attempt: %s | Feedback calculated: %s\nPress Enter to send feedback to %s: ",
                            pending_mastermind_guess, computed_fb, peer_name);
                     fflush(stdout);
-                    awaiting_feena_feedback_approval = 1;
+                    awaiting_feedback_approval = 1;
                 }
             } else if (msg.type == MSG_FEEDBACK) {
-                /* Tatva receives feedback from Feena */
+                /* Codebreaker receives feedback from Codemaker */
                 if (!game.is_mastermind) {
-                    int finished = game_record_turn(&game, tatva_last_attempt, msg.text);
+                    int finished = game_record_turn(&game, codebreaker_last_attempt, msg.text);
                     ui_render_board(&game);
                     if (finished) {
                         state = STATE_GAME_OVER;
@@ -289,7 +289,7 @@ int main(int argc, char *argv[]) {
                     }
                 }
             } else if (msg.type == MSG_END) {
-                /* Game ended: master sequence revealed to Tatva */
+                /* Game ended: master sequence revealed to Codebreaker */
                 strncpy(game.master_seq, msg.text, MM_SEQ_LEN);
                 game.master_seq[MM_SEQ_LEN] = '\0';
                 game.game_over = 1;
@@ -366,7 +366,7 @@ int main(int argc, char *argv[]) {
                         }
                     } else if (state == STATE_CHALLENGE_PENDING_IN) {
                         if (strcmp(input, "yes") == 0) {
-                            /* Accepted challenge -> We are Codebreaker (Tatva)! */
+                            /* Accepted challenge -> We are Codebreaker! */
                             game_init(&game, 0);
                             state = STATE_GAMEPLAY;
                             if (cost_cutting) {
@@ -392,7 +392,7 @@ int main(int argc, char *argv[]) {
                         }
                     } else if (state == STATE_GAMEPLAY) {
                         if (game.is_mastermind) {
-                            /* Feena's turn interactions */
+                            /* Codemaker turn interactions */
                             if (strcmp(game.master_seq, "*****") == 0) {
                                 /* Setting master sequence */
                                 if (!game_validate_sequence(input)) {
@@ -405,8 +405,8 @@ int main(int argc, char *argv[]) {
                                     printf("\nMaster sequence set! Waiting for %s to make attempt 1/12...\n", peer_name);
                                     fflush(stdout);
                                 }
-                            } else if (awaiting_feena_feedback_approval) {
-                                /* Feena pressed Enter to approve and send calculated feedback */
+                            } else if (awaiting_feedback_approval) {
+                                /* Codemaker pressed Enter to approve and send calculated feedback */
                                 char feedback[MM_SEQ_LEN + 1];
                                 game_compute_feedback(game.master_seq, pending_mastermind_guess, feedback);
                                 int finished = game_record_turn(&game, pending_mastermind_guess, feedback);
@@ -418,7 +418,7 @@ int main(int argc, char *argv[]) {
                                     tcp_send_msg(tcp.conn_fd, MSG_FEEDBACK, feedback);
                                 }
 
-                                awaiting_feena_feedback_approval = 0;
+                                awaiting_feedback_approval = 0;
 
                                 if (finished) {
                                     state = STATE_GAME_OVER;
@@ -441,14 +441,14 @@ int main(int argc, char *argv[]) {
                                 }
                             }
                         } else {
-                            /* Tatva's guess interactions */
+                            /* Codebreaker guess interactions */
                             if (!game_validate_sequence(input)) {
                                 printf("Invalid guess! Must be exactly 5 digits (0-9).\nAttempt %d/12: ",
                                        game.current_round + 1);
                                 fflush(stdout);
                             } else {
-                                strncpy(tatva_last_attempt, input, MM_SEQ_LEN);
-                                tatva_last_attempt[MM_SEQ_LEN] = '\0';
+                                strncpy(codebreaker_last_attempt, input, MM_SEQ_LEN);
+                                codebreaker_last_attempt[MM_SEQ_LEN] = '\0';
 
                                 if (cost_cutting) {
                                     udp_transport_send_msg(&ut, MSG_ATTEMPT, input);

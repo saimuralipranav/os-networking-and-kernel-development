@@ -8,7 +8,7 @@ typedef struct {
     char feedbacks[MM_MAX_ATTEMPTS][MM_SEQ_LEN + 1];
     int current_round;                     /* Number of completed rounds (0 .. 12) */
     char master_seq[MM_SEQ_LEN + 1];       /* Secret 5-digit code */
-    int is_mastermind;                     /* 1 if Feena (setter), 0 if Tatva (breaker) */
+    int is_mastermind;                     /* 1 if Mastermind (Codemaker), 0 if Codebreaker */
     int game_over;                         /* 1 if game has concluded */
     int codebreaker_won;                   /* 1 if codebreaker correctly identified code */
 } GameState;

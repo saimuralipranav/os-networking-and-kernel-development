@@ -45,7 +45,7 @@ void ui_render_board(const GameState *game) {
 
     printf("\033[2J\033[H"); /* Clear screen */
     printf("--- MASTERMIND GAME BOARD [%s] ---\n",
-           game->is_mastermind ? "Feena (Mastermind)" : "Tatva (Codebreaker)");
+           game->is_mastermind ? "Mastermind (Codemaker)" : "Codebreaker");
 
     for (int i = 0; i < MM_MAX_ATTEMPTS; i++) {
         if (i < game->current_round) {
