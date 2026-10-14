@@ -16,6 +16,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <signal.h>
 
 typedef enum {
     STATE_INIT_PROMPT = 0,
@@ -33,6 +34,7 @@ static void set_nonblocking(int fd) {
 }
 
 int main(int argc, char *argv[]) {
+    signal(SIGPIPE, SIG_IGN);
     int cost_cutting = 0;
     int logging = 0;
 
