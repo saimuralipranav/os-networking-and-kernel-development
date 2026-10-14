@@ -1,3 +1,5 @@
+#define _DEFAULT_SOURCE
+#define _BSD_SOURCE
 #include "discovery.h"
 #include "logger.h"
 #include <stdio.h>
@@ -8,9 +10,11 @@
 #include <errno.h>
 #include <sys/types.h>
 #include <sys/socket.h>
-#include <netinet/in.h>
 #include <arpa/inet.h>
 #include <time.h>
+#include <ifaddrs.h>
+#include <net/if.h>
+#include <sys/ioctl.h>
 
 int discovery_init(DiscoveryManager *dm, const char *name, uint16_t listen_port, int cost_cutting) {
     if (!dm || !name) return -1;
@@ -88,14 +92,29 @@ void discovery_broadcast_tick(DiscoveryManager *dm) {
     pkt.cost_cutting = (uint8_t)dm->cost_cutting;
     strncpy(pkt.name, dm->local_name, sizeof(pkt.name) - 1);
 
-    /* Broadcast to LAN broadcast address */
+    /* Broadcast to general INADDR_BROADCAST (255.255.255.255) */
     struct sockaddr_in bcast_addr;
     memset(&bcast_addr, 0, sizeof(bcast_addr));
     bcast_addr.sin_family = AF_INET;
     bcast_addr.sin_port = htons(MM_DISCOVERY_PORT);
     bcast_addr.sin_addr.s_addr = htonl(INADDR_BROADCAST);
-
     sendto(dm->udp_fd, &pkt, sizeof(pkt), 0, (struct sockaddr *)&bcast_addr, sizeof(bcast_addr));
+
+    /* Also broadcast to specific subnet broadcast address of every active interface (crucial for macOS & mirrored WSL) */
+    struct ifaddrs *ifaddr = NULL;
+    if (getifaddrs(&ifaddr) == 0) {
+        for (struct ifaddrs *ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
+            if (!ifa->ifa_addr || ifa->ifa_addr->sa_family != AF_INET) continue;
+            if (!(ifa->ifa_flags & IFF_UP)) continue;
+            if (ifa->ifa_flags & IFF_LOOPBACK) continue;
+            if (ifa->ifa_flags & IFF_BROADCAST && ifa->ifa_broadaddr) {
+                struct sockaddr_in *dst = (struct sockaddr_in *)ifa->ifa_broadaddr;
+                dst->sin_port = htons(MM_DISCOVERY_PORT);
+                sendto(dm->udp_fd, &pkt, sizeof(pkt), 0, (struct sockaddr *)dst, sizeof(*dst));
+            }
+        }
+        freeifaddrs(ifaddr);
+    }
 
     /* Also send to 127.0.0.1 for seamless multi-instance testing on localhost */
     struct sockaddr_in loop_addr;
@@ -103,7 +122,6 @@ void discovery_broadcast_tick(DiscoveryManager *dm) {
     loop_addr.sin_family = AF_INET;
     loop_addr.sin_port = htons(MM_DISCOVERY_PORT);
     inet_pton(AF_INET, "127.0.0.1", &loop_addr.sin_addr);
-
     sendto(dm->udp_fd, &pkt, sizeof(pkt), 0, (struct sockaddr *)&loop_addr, sizeof(loop_addr));
 
     logger_log("Sent discovery broadcast (name=%s, port=%u, instance_id=%llu)",
