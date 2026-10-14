@@ -1,9 +1,18 @@
 #ifndef MASTERMIND_UI_H
 #define MASTERMIND_UI_H
 
-#include "discovery.h"
 #include "game.h"
 #include <time.h>
+
+typedef struct {
+    int id;
+    uint64_t instance_id;
+    char name[MM_MAX_NAME_LEN];
+    char ip[64];
+    uint16_t port;
+    int cost_cutting;
+    time_t last_seen;
+} DiscoveredPlayer;
 
 /**
  * Clears terminal and displays the active online players lobby.

@@ -30,6 +30,7 @@ typedef enum {
 /* UDP Discovery Broadcast Packet */
 typedef struct __attribute__((packed)) {
     uint32_t magic;                       /* MM_MAGIC_DISCOVERY */
+    uint64_t instance_id;                 /* Globally unique process instance ID */
     uint16_t listen_port;                 /* Port peer is listening on (network byte order) */
     uint8_t cost_cutting;                 /* 1 if peer is in cost-cutting mode, 0 if TCP */
     char name[MM_MAX_NAME_LEN];           /* Null-terminated player name */

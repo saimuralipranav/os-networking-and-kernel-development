@@ -22,6 +22,20 @@ int discovery_init(DiscoveryManager *dm, const char *name, uint16_t listen_port,
     dm->local_name[MM_MAX_NAME_LEN - 1] = '\0';
     dm->next_id = 1;
 
+    /* Generate globally unique instance ID using /dev/urandom fallback to time/pid */
+    uint64_t inst_id = 0;
+    FILE *f = fopen("/dev/urandom", "rb");
+    if (f) {
+        if (fread(&inst_id, sizeof(inst_id), 1, f) != 1) {
+            inst_id = 0;
+        }
+        fclose(f);
+    }
+    if (inst_id == 0) {
+        inst_id = ((uint64_t)time(NULL) << 32) ^ (uint64_t)getpid() ^ ((uint64_t)listen_port << 16);
+    }
+    dm->local_instance_id = inst_id;
+
     dm->udp_fd = socket(AF_INET, SOCK_DGRAM, 0);
     if (dm->udp_fd < 0) {
         return -1;
@@ -69,6 +83,7 @@ void discovery_broadcast_tick(DiscoveryManager *dm) {
     DiscoveryPacket pkt;
     memset(&pkt, 0, sizeof(pkt));
     pkt.magic = htonl(MM_MAGIC_DISCOVERY);
+    pkt.instance_id = dm->local_instance_id;
     pkt.listen_port = htons(dm->local_port);
     pkt.cost_cutting = (uint8_t)dm->cost_cutting;
     strncpy(pkt.name, dm->local_name, sizeof(pkt.name) - 1);
@@ -91,7 +106,8 @@ void discovery_broadcast_tick(DiscoveryManager *dm) {
 
     sendto(dm->udp_fd, &pkt, sizeof(pkt), 0, (struct sockaddr *)&loop_addr, sizeof(loop_addr));
 
-    logger_log("Sent discovery broadcast (name=%s, port=%u)", dm->local_name, dm->local_port);
+    logger_log("Sent discovery broadcast (name=%s, port=%u, instance_id=%llu)",
+               dm->local_name, dm->local_port, (unsigned long long)dm->local_instance_id);
 }
 
 int discovery_recv_tick(DiscoveryManager *dm) {
@@ -120,23 +136,22 @@ int discovery_recv_tick(DiscoveryManager *dm) {
             continue;
         }
 
+        /* Filter self-broadcast: ignore if matching local instance ID or port */
+        if (pkt.instance_id == dm->local_instance_id || ntohs(pkt.listen_port) == dm->local_port) {
+            continue;
+        }
+
         uint16_t peer_port = ntohs(pkt.listen_port);
         char src_ip[64];
         inet_ntop(AF_INET, &src_addr.sin_addr, src_ip, sizeof(src_ip));
 
-        /* Filter self-broadcast: ignore if same port */
-        if (peer_port == dm->local_port) {
-            continue;
-        }
-
         pkt.name[sizeof(pkt.name) - 1] = '\0';
         time_t now = time(NULL);
 
-        /* Check if player is already recorded (match by port and name, or matching ip:port) */
+        /* Match existing peer strictly by unique instance_id */
         int found_idx = -1;
         for (int i = 0; i < dm->player_count; i++) {
-            if ((dm->players[i].port == peer_port && strcmp(dm->players[i].name, pkt.name) == 0) ||
-                (strcmp(dm->players[i].ip, src_ip) == 0 && dm->players[i].port == peer_port)) {
+            if (dm->players[i].instance_id == pkt.instance_id) {
                 found_idx = i;
                 break;
             }
@@ -144,15 +159,17 @@ int discovery_recv_tick(DiscoveryManager *dm) {
 
         if (found_idx >= 0) {
             dm->players[found_idx].last_seen = now;
-            /* If we got a real LAN IP, prefer it over loopback */
-            if (strcmp(src_ip, "127.0.0.1") != 0) {
+            /* Prioritize real LAN IP over loopback for cross-machine accessibility */
+            if (strcmp(src_ip, "127.0.0.1") != 0 || strcmp(dm->players[found_idx].ip, "127.0.0.1") == 0) {
                 strncpy(dm->players[found_idx].ip, src_ip, sizeof(dm->players[found_idx].ip) - 1);
             }
+            dm->players[found_idx].port = peer_port;
             strncpy(dm->players[found_idx].name, pkt.name, sizeof(dm->players[found_idx].name) - 1);
             dm->players[found_idx].cost_cutting = pkt.cost_cutting;
         } else if (dm->player_count < MM_MAX_PLAYERS) {
             int idx = dm->player_count++;
             dm->players[idx].id = dm->next_id++;
+            dm->players[idx].instance_id = pkt.instance_id;
             strncpy(dm->players[idx].name, pkt.name, sizeof(dm->players[idx].name) - 1);
             dm->players[idx].name[sizeof(dm->players[idx].name) - 1] = '\0';
             strncpy(dm->players[idx].ip, src_ip, sizeof(dm->players[idx].ip) - 1);

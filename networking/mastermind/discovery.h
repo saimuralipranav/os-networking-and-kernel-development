@@ -1,25 +1,16 @@
 #ifndef MASTERMIND_DISCOVERY_H
 #define MASTERMIND_DISCOVERY_H
 
-#include "protocol.h"
+#include "ui.h"
 #include <stdint.h>
-#include <time.h>
 
 #define MM_MAX_PLAYERS 32
 #define MM_BROADCAST_INTERVAL_SEC 2
 #define MM_PEER_TIMEOUT_SEC 5
 
 typedef struct {
-    int id;
-    char name[MM_MAX_NAME_LEN];
-    char ip[64];
-    uint16_t port;
-    int cost_cutting;
-    time_t last_seen;
-} DiscoveredPlayer;
-
-typedef struct {
     int udp_fd;
+    uint64_t local_instance_id;
     uint16_t local_port;
     char local_name[MM_MAX_NAME_LEN];
     int cost_cutting;
