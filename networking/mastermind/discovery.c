@@ -132,10 +132,11 @@ int discovery_recv_tick(DiscoveryManager *dm) {
         pkt.name[sizeof(pkt.name) - 1] = '\0';
         time_t now = time(NULL);
 
-        /* Check if player is already recorded */
+        /* Check if player is already recorded (match by port and name, or matching ip:port) */
         int found_idx = -1;
         for (int i = 0; i < dm->player_count; i++) {
-            if (strcmp(dm->players[i].ip, src_ip) == 0 && dm->players[i].port == peer_port) {
+            if ((dm->players[i].port == peer_port && strcmp(dm->players[i].name, pkt.name) == 0) ||
+                (strcmp(dm->players[i].ip, src_ip) == 0 && dm->players[i].port == peer_port)) {
                 found_idx = i;
                 break;
             }
@@ -143,6 +144,10 @@ int discovery_recv_tick(DiscoveryManager *dm) {
 
         if (found_idx >= 0) {
             dm->players[found_idx].last_seen = now;
+            /* If we got a real LAN IP, prefer it over loopback */
+            if (strcmp(src_ip, "127.0.0.1") != 0) {
+                strncpy(dm->players[found_idx].ip, src_ip, sizeof(dm->players[found_idx].ip) - 1);
+            }
             strncpy(dm->players[found_idx].name, pkt.name, sizeof(dm->players[found_idx].name) - 1);
             dm->players[found_idx].cost_cutting = pkt.cost_cutting;
         } else if (dm->player_count < MM_MAX_PLAYERS) {
