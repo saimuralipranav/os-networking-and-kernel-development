@@ -62,15 +62,19 @@ The application is architected into modular components:
 #### Discovery
 
 - Uses a dedicated 4-byte magic identifier: `0x4D4D4E44` ("MMND").
+- Discovery port: `34567` (broadcast on LAN and loopback).
 - Broadcast payload layout:
   ```c
   struct discovery_pkt {
-    uint32_t magic;      // 0x4D4D4E44
-    uint16_t port;       // TCP or UDP listening port (network byte order)
-    char name[32];       // Null-terminated player username
+    uint32_t magic;         // 0x4D4D4E44 ("MMND")
+    uint64_t instance_id;   // Globally unique random instance ID per running process
+    uint16_t port;          // TCP or UDP listening port (network byte order)
+    uint8_t cost_cutting;   // 1 if cost-cutting enabled, 0 if TCP
+    char name[32];          // Null-terminated player username
   };
   ```
-- The sender's IP address is extracted directly from `recvfrom()`'s `struct sockaddr_in` source address, never from the packet payload. Non-matching broadcast packets are discarded.
+- The sender's IP address is extracted directly from `recvfrom()`'s `struct sockaddr_in` source address, never from the packet payload.
+- Unique instance IDs eliminate duplicate entries when announcements arrive across multiple interfaces (e.g., Wi-Fi broadcast + loopback) while allowing distinct players who share the same name on the LAN to be accurately discovered. Non-matching broadcast packets are discarded.
 
 #### Message verbs
 
