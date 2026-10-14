@@ -207,6 +207,12 @@ int discovery_prune_expired(DiscoveryManager *dm) {
         }
     }
 
+    /* Re-index active players to 1..count so IDs remain contiguous */
+    for (int k = 0; k < dm->player_count; k++) {
+        dm->players[k].id = k + 1;
+    }
+    dm->next_id = dm->player_count + 1;
+
     return changed;
 }
 
