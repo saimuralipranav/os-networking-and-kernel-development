@@ -183,10 +183,14 @@ int http_get_weather(const char *encoded_city, HttpResponse *resp) {
             if (pr > 0 && (pfd.revents & (POLLOUT | POLLERR | POLLHUP))) {
                 int so_error = 0;
                 socklen_t len = sizeof(so_error);
-                if (getsockopt(sockfd, SOL_SOCKET, SO_ERROR, &so_error, &len) == 0 && so_error == 0) {
-                    break; /* Connected successfully */
+                if (getsockopt(sockfd, SOL_SOCKET, SO_ERROR, &so_error, &len) == 0) {
+                    if (so_error == 0) {
+                        break; /* Connected successfully */
+                    }
+                    last_conn_error = so_error;
+                } else {
+                    last_conn_error = errno ? errno : ECONNREFUSED;
                 }
-                last_conn_error = (so_error != 0) ? so_error : ECONNREFUSED;
             } else if (pr == 0) {
                 last_conn_error = ETIMEDOUT;
             } else {

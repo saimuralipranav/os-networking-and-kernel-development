@@ -90,6 +90,14 @@ int main(int argc, char *argv[]) {
             fputs(resp.body, stdout);
         }
 
+        if (rc != 0) {
+            if (resp.error_msg[0] != '\0') {
+                fprintf(stderr, "tempest: %s\n", resp.error_msg);
+            } else {
+                fprintf(stderr, "tempest: network error\n");
+            }
+        }
+
         int exit_code = (rc != 0 || !resp.is_valid_location) ? 1 : 0;
         http_response_free(&resp);
         return exit_code;

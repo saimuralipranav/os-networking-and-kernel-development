@@ -122,6 +122,10 @@ int main(int argc, char *argv[]) {
             }
             if (lobby_needs_render) {
                 ui_render_lobby(dm.players, dm.player_count, local_name, transport_port, cost_cutting);
+                if (stdin_len > 0) {
+                    fwrite(stdin_buf, 1, stdin_len, stdout);
+                    fflush(stdout);
+                }
                 lobby_needs_render = 0;
             }
         }
