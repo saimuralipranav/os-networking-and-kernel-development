@@ -245,6 +245,7 @@ int main(int argc, char *argv[]) {
                 /* Opponent accepted our challenge -> We are Mastermind (Codemaker)! */
                 game_init(&game, 1);
                 state = STATE_GAMEPLAY;
+                ui_render_board(&game);
                 printf("\n%s accepted the challenge! You are the Mastermind (Codemaker).\n", peer_name);
                 printf("Enter 5-digit master sequence: ");
                 fflush(stdout);
@@ -264,11 +265,17 @@ int main(int argc, char *argv[]) {
                     char computed_fb[MM_SEQ_LEN + 1];
                     game_compute_feedback(game.master_seq, pending_mastermind_guess, computed_fb);
 
-                    printf("\nReceived attempt: %s | Feedback calculated: %s\nPress Enter to send feedback to %s: ",
+                    printf("\nReceived attempt: %s | Feedback calculated: %s\nPress Enter to send to %s (or type custom 5-char feedback): ",
                            pending_mastermind_guess, computed_fb, peer_name);
                     fflush(stdout);
                     awaiting_feedback_approval = 1;
                 }
+            } else if (msg.type == MSG_START) {
+                /* Mastermind has set the secret code -> Game begins for Codebreaker! */
+                ui_render_board(&game);
+                printf("\n%s has set the master sequence! Game begins.\n", peer_name);
+                printf("Attempt 1/12: ");
+                fflush(stdout);
             } else if (msg.type == MSG_FEEDBACK) {
                 /* Codebreaker receives feedback from Codemaker */
                 if (!game.is_mastermind) {
@@ -374,6 +381,7 @@ int main(int argc, char *argv[]) {
                             } else {
                                 tcp_send_msg(tcp.conn_fd, MSG_ACCEPT, local_name);
                             }
+                            ui_render_board(&game);
                             printf("\nYou accepted! Waiting for %s to set the master sequence...\n", peer_name);
                             fflush(stdout);
                         } else if (strcmp(input, "no") == 0) {
@@ -404,11 +412,22 @@ int main(int argc, char *argv[]) {
                                     ui_render_board(&game);
                                     printf("\nMaster sequence set! Waiting for %s to make attempt 1/12...\n", peer_name);
                                     fflush(stdout);
+
+                                    if (cost_cutting) {
+                                        udp_transport_send_msg(&ut, MSG_START, "START");
+                                    } else {
+                                        tcp_send_msg(tcp.conn_fd, MSG_START, "START");
+                                    }
                                 }
                             } else if (awaiting_feedback_approval) {
-                                /* Codemaker pressed Enter to approve and send calculated feedback */
+                                /* Codemaker pressed Enter or entered custom feedback */
                                 char feedback[MM_SEQ_LEN + 1];
-                                game_compute_feedback(game.master_seq, pending_mastermind_guess, feedback);
+                                if (strlen(input) == MM_SEQ_LEN && game_validate_feedback(input)) {
+                                    strncpy(feedback, input, MM_SEQ_LEN);
+                                    feedback[MM_SEQ_LEN] = '\0';
+                                } else {
+                                    game_compute_feedback(game.master_seq, pending_mastermind_guess, feedback);
+                                }
                                 int finished = game_record_turn(&game, pending_mastermind_guess, feedback);
                                 ui_render_board(&game);
 

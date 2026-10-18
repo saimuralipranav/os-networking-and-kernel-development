@@ -24,7 +24,8 @@ typedef enum {
     MSG_FEEDBACK = 5,
     MSG_END = 6,
     MSG_DISCONNECT = 7,
-    MSG_HEARTBEAT = 8
+    MSG_HEARTBEAT = 8,
+    MSG_START = 9
 } MessageType;
 
 /* UDP Discovery Broadcast Packet */
