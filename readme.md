@@ -34,8 +34,9 @@ none
 #### Assumptions
 
 - wttr.is is reachable via raw HTTP on port 80. Standard terminal displays UTF-8 weather icons and ANSI text.
-- Running without arguments outputs `tempest: invalid location` and exits with code 1 (per Q4).
-- If `--raw` appears in the wrong position (e.g. before the city), it is treated as an invalid location or too many arguments (per Q6).
+- Running without arguments (`tempest`) or passing `--raw` alone (`tempest --raw`) prints `tempest: invalid location` and exits with code 1 (per Q4).
+- Passing `--raw` before the city (`tempest --raw Hyderabad`) prints `tempest: too many arguments` and exits with code 1 (per Q6).
+- The 10-second request deadline begins before `connect()` per Q15 (DNS resolution via `getaddrinfo` is performed immediately prior).
 - Both `./tempest <city>` and `tempest <city>` (when adding directory to `$PATH`) are supported run styles (per Q21).
 
 #### Known bugs

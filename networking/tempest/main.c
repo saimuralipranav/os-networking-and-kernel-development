@@ -68,6 +68,7 @@ int main(int argc, char *argv[]) {
     }
 
     HttpResponse resp;
+    memset(&resp, 0, sizeof(resp));
     int rc = http_get_weather(encoded_city, &resp);
     free(encoded_city);
 

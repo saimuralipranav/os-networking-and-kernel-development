@@ -139,7 +139,7 @@ int http_get_weather(const char *encoded_city, HttpResponse *resp) {
     struct addrinfo *res = NULL;
     int rc = getaddrinfo(WTTR_HOST, WTTR_PORT, &hints, &res);
     if (rc != 0) {
-        snprintf(resp->error_msg, sizeof(resp->error_msg), "failed to resolve host %s", WTTR_HOST);
+        snprintf(resp->error_msg, sizeof(resp->error_msg), "failed to resolve host %s: %s", WTTR_HOST, gai_strerror(rc));
         return -1;
     }
 
@@ -148,14 +148,17 @@ int http_get_weather(const char *encoded_city, HttpResponse *resp) {
     clock_gettime(CLOCK_MONOTONIC, &start_ts);
 
     int sockfd = -1;
+    int last_conn_error = 0;
     for (struct addrinfo *p = res; p != NULL; p = p->ai_next) {
         int rem = get_remaining_timeout_ms(start_ts, REQUEST_TIMEOUT_SEC);
         if (rem <= 0) {
+            last_conn_error = ETIMEDOUT;
             break;
         }
 
         sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
         if (sockfd < 0) {
+            last_conn_error = errno;
             continue;
         }
 
@@ -183,7 +186,14 @@ int http_get_weather(const char *encoded_city, HttpResponse *resp) {
                 if (getsockopt(sockfd, SOL_SOCKET, SO_ERROR, &so_error, &len) == 0 && so_error == 0) {
                     break; /* Connected successfully */
                 }
+                last_conn_error = (so_error != 0) ? so_error : ECONNREFUSED;
+            } else if (pr == 0) {
+                last_conn_error = ETIMEDOUT;
+            } else {
+                last_conn_error = errno;
             }
+        } else {
+            last_conn_error = errno;
         }
 
         close(sockfd);
@@ -192,10 +202,10 @@ int http_get_weather(const char *encoded_city, HttpResponse *resp) {
     freeaddrinfo(res);
 
     if (sockfd < 0) {
-        if (get_remaining_timeout_ms(start_ts, REQUEST_TIMEOUT_SEC) <= 0) {
+        if (get_remaining_timeout_ms(start_ts, REQUEST_TIMEOUT_SEC) <= 0 || last_conn_error == ETIMEDOUT) {
             snprintf(resp->error_msg, sizeof(resp->error_msg), "request timed out");
         } else {
-            snprintf(resp->error_msg, sizeof(resp->error_msg), "connection failed: %s", strerror(errno ? errno : ECONNREFUSED));
+            snprintf(resp->error_msg, sizeof(resp->error_msg), "connection failed: %s", strerror(last_conn_error ? last_conn_error : ECONNREFUSED));
         }
         return -1;
     }
