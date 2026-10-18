@@ -11,6 +11,7 @@ typedef struct {
     char *body;              /* Parsed and decoded weather report body */
     int status_code;         /* HTTP status code (e.g. 200, 404, 500) */
     int is_valid_location;   /* 1 if location found and report valid, 0 otherwise */
+    char error_msg[128];     /* Error message if network failure occurred */
 } HttpResponse;
 
 int http_get_weather(const char *encoded_city, HttpResponse *resp);

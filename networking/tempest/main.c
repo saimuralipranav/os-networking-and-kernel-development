@@ -94,7 +94,17 @@ int main(int argc, char *argv[]) {
         return exit_code;
     }
 
-    if (rc != 0 || !resp.is_valid_location) {
+    if (rc != 0) {
+        if (resp.error_msg[0] != '\0') {
+            fprintf(stderr, "tempest: %s\n", resp.error_msg);
+        } else {
+            fprintf(stderr, "tempest: network error\n");
+        }
+        http_response_free(&resp);
+        return 1;
+    }
+
+    if (!resp.is_valid_location) {
         http_response_free(&resp);
         fprintf(stderr, "tempest: invalid location\n");
         return 1;
