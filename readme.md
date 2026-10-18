@@ -33,7 +33,10 @@ none
 
 #### Assumptions
 
-wttr.is is reachable via raw HTTP on port 80. Standard terminal displays UTF-8 weather icons and ANSI text.
+- wttr.is is reachable via raw HTTP on port 80. Standard terminal displays UTF-8 weather icons and ANSI text.
+- Running without arguments outputs `tempest: invalid location` and exits with code 1 (per Q4).
+- If `--raw` appears in the wrong position (e.g. before the city), it is treated as an invalid location or too many arguments (per Q6).
+- Both `./tempest <city>` and `tempest <city>` (when adding directory to `$PATH`) are supported run styles (per Q21).
 
 #### Known bugs
 

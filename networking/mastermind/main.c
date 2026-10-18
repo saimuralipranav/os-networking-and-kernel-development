@@ -100,6 +100,7 @@ int main(int argc, char *argv[]) {
 
 
     int lobby_needs_render = 1;
+    time_t last_lobby_refresh_sec = 0;
     char pending_mastermind_guess[MM_SEQ_LEN + 1] = "";
     char codebreaker_last_attempt[MM_SEQ_LEN + 1] = "";
     int awaiting_feedback_approval = 0;
@@ -112,6 +113,11 @@ int main(int argc, char *argv[]) {
                 lobby_needs_render = 1;
             }
             if (discovery_prune_expired(&dm)) {
+                lobby_needs_render = 1;
+            }
+            time_t now_sec = time(NULL);
+            if (now_sec != last_lobby_refresh_sec) {
+                last_lobby_refresh_sec = now_sec;
                 lobby_needs_render = 1;
             }
             if (lobby_needs_render) {
