@@ -52,7 +52,7 @@ mastermind [--cost-cutting] [--log]
 The application is architected into modular components:
 - `protocol.h`: Defines the packet formats, protocol magic constants, and message verb structures.
 - `main.c`: Coordinates CLI options (`--cost-cutting`, `--log`), terminal setup, game lobby loop, and invokes transports.
-- `discovery.h` / `discovery.c`: Non-blocking UDP broadcast announcement on port `8888`. Automatically prunes inactive peers after 5 seconds of inactivity.
+- `discovery.h` / `discovery.c`: Non-blocking UDP broadcast announcement on port `34567`. Automatically prunes inactive peers after 5 seconds of inactivity.
 - `game.h` / `game.c`: Implements the Mastermind game state machine, sequence validation (strictly 5 digits `0-9`), and exact Bulls & Cows peg calculation (`x`, `o`, `-`) using digit frequency counters to properly handle duplicates.
 - `ui.h` / `ui.c`: Renders the 12-row board view, masks the secret code for Codebreaker (`*****`), displays ANSI colored feedback pegs (`x` green, `o` yellow, `-` red), and prompts for input.
 - `logger.h` / `logger.c`: Append-mode file logger writing microsecond timestamps `[YYYY-MM-DD HH:MM:SS.uuuuuu] [LOG] ...` to `log.txt`.
@@ -79,12 +79,14 @@ The application is architected into modular components:
 #### Message verbs
 
 1. `MSG_CHALLENGE`: Initiator requests a game with peer. Payload: player name.
-2. `MSG_ACCEPT`: Peer accepts challenge. Initiator becomes Mastermind (Feena), accepter becomes Codebreaker (Tatva).
+2. `MSG_ACCEPT`: Peer accepts challenge. Initiator becomes Mastermind (Codemaker), accepter becomes Codebreaker.
 3. `MSG_REJECT`: Peer declines challenge, returning both to lobby.
 4. `MSG_ATTEMPT`: Codebreaker sends 5-digit guess to Mastermind.
 5. `MSG_FEEDBACK`: Mastermind sends 5 feedback pegs (`x`, `o`, `-`) to Codebreaker.
-6. `MSG_REVEAL`: Mastermind sends true secret code at game termination (win or 12 turns exhausted).
+6. `MSG_END`: Mastermind reveals secret code to Codebreaker upon game conclusion.
 7. `MSG_DISCONNECT`: Sent when a player quits or cleanly disconnects.
+8. `MSG_HEARTBEAT`: Periodic keepalive frame between connected peers.
+9. `MSG_START`: Mastermind notifies Codebreaker that the secret code is set, initiating round 1.
 
 #### Reliable transfer over UDP (`--cost-cutting`)
 
@@ -121,7 +123,7 @@ none
 
 #### Assumptions
 
-Local network allows UDP broadcast packets (`SO_BROADCAST`) on port 8888. Standard ANSI-compatible terminal.
+Local network allows UDP broadcast packets (`SO_BROADCAST`) on port 34567. Standard ANSI-compatible terminal.
 
 #### Known bugs
 
